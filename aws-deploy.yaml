@@ -1,0 +1,109 @@
+# AWS Deployment — YouTube Shorts Agent
+# Services: Lambda (runner) + ECR (Docker image) + EventBridge (daily schedule) + Secrets Manager (OAuth token)
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: YouTube Shorts Agent — Daily automated Short publisher
+
+Parameters:
+  ImageUri:
+    Type: String
+    Description: ECR image URI (e.g. 123456789.dkr.ecr.us-east-1.amazonaws.com/shorts-agent:latest)
+  AnthropicApiKey:
+    Type: String
+    NoEcho: true
+  PexelsApiKey:
+    Type: String
+    NoEcho: true
+  DefaultNiche:
+    Type: String
+    Default: psychology
+    AllowedValues: [psychology, whatif]
+  ScheduleExpression:
+    Type: String
+    Default: "cron(0 9 * * ? *)"    # Daily at 9 AM UTC
+    Description: EventBridge cron schedule
+
+Resources:
+
+  # IAM Role for Lambda
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: youtube-shorts-agent-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ShortsAgentPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - polly:SynthesizeSpeech
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:UpdateSecret
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:youtube-shorts-agent/*"
+
+  # Lambda Function (container image)
+  ShortsAgentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: youtube-shorts-agent
+      PackageType: Image
+      Code:
+        ImageUri: !Ref ImageUri
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 600         # 10 minutes — enough for download + render + upload
+      MemorySize: 3008     # 3GB RAM — ffmpeg needs headroom
+      EphemeralStorage:
+        Size: 2048         # 2GB /tmp for video files
+      Environment:
+        Variables:
+          ANTHROPIC_API_KEY: !Ref AnthropicApiKey
+          PEXELS_API_KEY: !Ref PexelsApiKey
+          AWS_REGION_NAME: !Ref AWS::Region
+          POLLY_VOICE: Matthew
+          YOUTUBE_SECRET_NAME: youtube-shorts-agent/oauth-token
+          DEFAULT_NICHE: !Ref DefaultNiche
+
+  # EventBridge rule — triggers Lambda daily
+  DailyScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: youtube-shorts-daily-trigger
+      Description: Triggers YouTube Shorts agent daily
+      ScheduleExpression: !Ref ScheduleExpression
+      State: ENABLED
+      Targets:
+        - Id: ShortsAgentTarget
+          Arn: !GetAtt ShortsAgentFunction.Arn
+          Input: !Sub '{"niche": "${DefaultNiche}"}'
+
+  # Allow EventBridge to invoke Lambda
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ShortsAgentFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DailyScheduleRule.Arn
+
+Outputs:
+  LambdaArn:
+    Value: !GetAtt ShortsAgentFunction.Arn
+  ScheduleRule:
+    Value: !Ref DailyScheduleRule
