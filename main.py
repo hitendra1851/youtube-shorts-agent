@@ -10,8 +10,10 @@ Run `claude login` once before deploying.
 
 import os
 import sys
+import json
 import logging
 from datetime import datetime
+from pathlib import Path
 from dotenv import load_dotenv
 
 from steps.research import fetch_topic
@@ -24,11 +26,49 @@ from steps.cleanup import cleanup_output
 
 load_dotenv()
 
+# In Lambda /var/task is read-only; redirect writable dirs to /tmp
+_IN_LAMBDA = os.environ.get("AWS_LAMBDA_FUNCTION_NAME") is not None
+_LOG_DIR = "/tmp/logs" if _IN_LAMBDA else "logs"
+_OUT_DIR = "/tmp/output" if _IN_LAMBDA else "output"
+if _IN_LAMBDA:
+    os.makedirs(_LOG_DIR, exist_ok=True)
+    os.makedirs(_OUT_DIR, exist_ok=True)
+
+
+def _bootstrap_claude_auth():
+    """
+    Load Claude OAuth credentials from Secrets Manager and write to /tmp so the
+    claude CLI subprocess can authenticate using the user's Pro/Max subscription.
+    Only runs when CLAUDE_SECRET_NAME is set (i.e. inside Lambda).
+    """
+    secret_name = os.getenv("CLAUDE_SECRET_NAME")
+    if not secret_name:
+        return  # Local dev: assume claude login already done
+    try:
+        import boto3
+        region = os.getenv("AWS_REGION_NAME", "us-east-1")
+        sm = boto3.client("secretsmanager", region_name=region)
+        secret = json.loads(sm.get_secret_value(SecretId=secret_name)["SecretString"])
+
+        # Lambda's only writable directory is /tmp
+        tmp = Path("/tmp")
+        (tmp / ".claude.json").write_text(json.dumps(secret["claude_json"]))
+        claude_dir = tmp / ".claude"
+        claude_dir.mkdir(exist_ok=True)
+
+        os.environ["HOME"] = "/tmp"
+        os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+    except Exception as e:
+        logging.warning(f"Could not load Claude auth from Secrets Manager: {e}")
+
+
+_bootstrap_claude_auth()
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler(f"logs/run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"),
+        logging.FileHandler(f"{_LOG_DIR}/run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"),
         logging.StreamHandler(sys.stdout),
     ],
 )
@@ -55,7 +95,7 @@ def run_agent(niche: str = "psychology", dry_run: bool = False):
     log.info(f"=== YouTube Shorts Agent Starting | Niche: {niche} ===")
     config = NICHE_CONFIG.get(niche, NICHE_CONFIG["psychology"])
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = f"output/{run_id}"
+    output_dir = f"{_OUT_DIR}/{run_id}"
     os.makedirs(output_dir, exist_ok=True)
 
     try:

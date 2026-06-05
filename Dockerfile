@@ -1,7 +1,13 @@
-FROM public.ecr.aws/lambda/python:3.12
+FROM python:3.12-slim
 
-# Install ffmpeg + fonts + Node.js (required by Claude Code CLI)
-RUN dnf install -y ffmpeg dejavu-sans-fonts nodejs && dnf clean all
+# Install Lambda Runtime Interface Client + system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ffmpeg fonts-dejavu nodejs npm curl && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir awslambdaric
+
+WORKDIR /var/task
+ENV LAMBDA_TASK_ROOT=/var/task
 
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
@@ -14,9 +20,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY main.py .
 COPY steps/ steps/
 
-# Claude Code auth — deploy.sh copies ~/.claude/ here before docker build
-# CLAUDE_CONFIG_DIR tells the Agent SDK where to find the auth token
-COPY .claude/ /var/task/.claude/
-ENV CLAUDE_CONFIG_DIR=/var/task/.claude
+# Claude auth is loaded at runtime from AWS Secrets Manager into /tmp
+# (see _bootstrap_claude_auth in main.py — no credentials baked into image)
 
+ENTRYPOINT ["/usr/local/bin/python", "-m", "awslambdaric"]
 CMD ["main.lambda_handler"]

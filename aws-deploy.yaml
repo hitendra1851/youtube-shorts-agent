@@ -74,6 +74,7 @@ Resources:
           AWS_REGION_NAME: !Ref AWS::Region
           POLLY_VOICE: Matthew
           YOUTUBE_SECRET_NAME: youtube-shorts-agent/oauth-token
+          CLAUDE_SECRET_NAME: youtube-shorts-agent/claude-auth
           DEFAULT_NICHE: !Ref DefaultNiche
 
   # EventBridge rule — triggers Lambda daily
