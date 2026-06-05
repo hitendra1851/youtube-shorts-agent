@@ -8,9 +8,6 @@ Parameters:
   ImageUri:
     Type: String
     Description: ECR image URI (e.g. 123456789.dkr.ecr.us-east-1.amazonaws.com/shorts-agent:latest)
-  AnthropicApiKey:
-    Type: String
-    NoEcho: true
   PexelsApiKey:
     Type: String
     NoEcho: true
@@ -73,7 +70,6 @@ Resources:
         Size: 2048         # 2GB /tmp for video files
       Environment:
         Variables:
-          ANTHROPIC_API_KEY: !Ref AnthropicApiKey
           PEXELS_API_KEY: !Ref PexelsApiKey
           AWS_REGION_NAME: !Ref AWS::Region
           POLLY_VOICE: Matthew

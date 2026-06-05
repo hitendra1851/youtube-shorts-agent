@@ -14,8 +14,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY main.py .
 COPY steps/ steps/
 
-# Mount ~/.claude/ auth at runtime via Lambda env or layer
-# Set CLAUDE_CONFIG_DIR if auth files are stored elsewhere
+# Claude Code auth — deploy.sh copies ~/.claude/ here before docker build
+# CLAUDE_CONFIG_DIR tells the Agent SDK where to find the auth token
+COPY .claude/ /var/task/.claude/
 ENV CLAUDE_CONFIG_DIR=/var/task/.claude
 
 CMD ["main.lambda_handler"]
