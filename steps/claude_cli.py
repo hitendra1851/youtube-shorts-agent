@@ -27,7 +27,7 @@ def ask_claude(prompt: str, system: str = None, max_tokens: int = 1000) -> str:
         async for message in query(
             prompt=full_prompt,
             options=ClaudeAgentOptions(
-                allowed_tools=[],          # text-only, no tools needed
+                tools=[],              # text-only, no tools needed
                 permission_mode="default",
             ),
         ):
